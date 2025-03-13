@@ -60,6 +60,51 @@ void cross_mat(const gsl_vector *u,gsl_matrix *ux){
 
 }
 
+void merge_edges(edge *e1,edge *e2){
+	double k1 = e1->k, l1 = e1->l;
+	double k2 = e2->k, l2 = e2->l;
+	double k = k1+k2;
+	double l = (k1*l1 + k2*l2)/k;
+	e1->k = k; e1->l = l;
+}
+
+edge *remove_edge(edge *e, int n_e,int i_r){
+	for(int i = i_r;i<(n_e-1);++i){
+		*(e +i) = *(e + i +1);
+	}
+	return realloc(e,(n_e-1)*sizeof(edge));
+}
+
+void reduce_edges(springs *s){
+	int n_e = s->n_e, b = 0;
+	point *p1i, *p1j, *p2i, *p2j;
+	edge *e = s->e;
+	int k_1, k_2;
+	for(k_1 = 0; k_1<n_e;++k_1){
+		p1i = (e+k_1)->p_i;
+		p1j = (e+k_1)->p_j;
+		for(k_2 = k_1+1;k_2<n_e;++k_2){
+			p2i = (e+k_2)->p_i;
+			p2j = (e+k_2)->p_j;
+			b = (p1i == p2i)*(p1j == p2j) + (p1i == p2j)*(p1j == p2i);
+			if(b){
+				break;
+			}
+
+		}
+		if(b){
+			break;
+		}
+	}
+	if(b){
+	printf("merging edges %d and %d\n",k_1,k_2);
+	merge_edges(e+k_1, e+k_2);
+	s->e = remove_edge(e,n_e,k_2);
+	s->n_e = n_e-1;
+	reduce_edges(s);
+	}
+}
+
 void rotate(springs *s, double eps){
 	gsl_blas_dgemv(CblasNoTrans, eps, s->rot_mat,s->P_x, 1, s->P_x);
 	gsl_blas_dgemv(CblasNoTrans, eps, s->rot_mat,s->P_y, 1, s->P_y);
@@ -156,9 +201,9 @@ int main(){
 
 
 	int np = 3;
-	int ne = 3;
+	int ne = 4;
 	point *p = malloc(np*sizeof(point));
-	edge *e = malloc(np*sizeof(edge));
+	edge *e = malloc(ne*sizeof(edge));
 
 	for(int i = 0;i < np; ++i){
 		init_point(p+i, n, 1, 0.01);
@@ -169,11 +214,12 @@ int main(){
 	(p+2)->x->data[2] = 1;
 
 	edge e12 = {.k=1,.l=1,.p_i = p,.p_j = p+1};
+	edge e12p = {.k=1,.l=1,.p_i = p,.p_j = p+1};
 	edge e13 = {.k=1,.l=1,.p_i = p,.p_j =p+2};
 	edge e23 = {.k=1,.l=1,.p_i = p+1,.p_j = p+2};
 	int k = 0;
 
-	*e = e12;*(e+1) = e13;*(e+2) = e23;
+	*e = e12;*(e+1) = e13;*(e+2) = e23;; *(e+3) = (e12p);
 
 	
 
@@ -213,17 +259,9 @@ int main(){
 			rgba_pixels[i] = WHITE;
 		}
 		update_springs_pix(&s, rgba_pixels, w, h);
-		printf("\n-------------------------\n");
+		//printf("\n-------------------------\n");
 		edge *e = s.e;
-		
-		printf("\nx = ");
-		for(int i = 0;i<n;++i){
-			printf("%g",s.P_x->data[i*s.P_x->stride]);
-		}
-		printf("\ny = ");
-		for(int i = 0;i<n;++i){
-			printf("%g",s.P_y->data[i*s.P_x->stride]);
-		}
+	
 
 		if(IsKeyDown(KEY_LEFT)){
 			rotate(&s,dt);
@@ -231,6 +269,12 @@ int main(){
 
 			rotate(&s,-dt);
 		
+		}
+		if(IsKeyPressed(KEY_SPACE)){
+
+			printf("before ne = %d\n",s.n_e);
+			reduce_edges(&s);
+			printf("after ne = %d\n",s.n_e);
 		}
 	
 		UpdateTexture(tex, rgba_pixels);
