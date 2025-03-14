@@ -17,6 +17,7 @@ typedef struct point point ;
 typedef struct edge edge;
 typedef struct Cursor Cursor;
 typedef struct springs springs;
+typedef struct plane plane;
 
 struct Cursor{
 	double x,y,vx,vy,s;
@@ -40,10 +41,16 @@ struct springs{
 	gsl_vector *mx;
 	int n_p, n_e;
 	gsl_vector *scrtch;
+
+};
+
+struct plane{
+	gsl_vector *r;
 	gsl_vector *P_x;
 	gsl_vector *P_y;
 	gsl_vector *rot_ax;
 	gsl_matrix *rot_mat;
+	gsl_vector *scrtch;
 };
 
 void cross_mat(const gsl_vector *u,gsl_matrix *ux){
@@ -105,19 +112,25 @@ void reduce_edges(springs *s){
 	}
 }
 
-void rotate(springs *s, double eps){
-	gsl_blas_dgemv(CblasNoTrans, eps, s->rot_mat,s->P_x, 1, s->P_x);
-	gsl_blas_dgemv(CblasNoTrans, eps, s->rot_mat,s->P_y, 1, s->P_y);
-	double dx = gsl_blas_dnrm2(s->P_x);
-	double dy = gsl_blas_dnrm2(s->P_y);
+void rotate(plane *Pi, double eps){
+	gsl_blas_dgemv(CblasNoTrans, eps, Pi->rot_mat,Pi->P_x, 1, Pi->P_x);
+	gsl_blas_dgemv(CblasNoTrans, eps, Pi->rot_mat,Pi->P_y, 1, Pi->P_y);
+	//double dx = gsl_blas_dnrm2(s->P_x);
+	//double dy = gsl_blas_dnrm2(s->P_y);
 	//gsl_vector_scale(s->P_x, 1.0/(dx + 0.0000000000000000000000000001));
 	//gsl_vector_scale(s->P_y, 1.0/(dy + 0.0000000000000000000000000001));
 }
 
 void upd_point_x(point *p,springs *s){
 	gsl_vector_axpby(dt,p->v,1,p->x);
-	gsl_blas_ddot(p->x,s->P_x,&p->x_2d->data[p->x_2d->stride*0]);
-	gsl_blas_ddot(p->x,s->P_y,&p->x_2d->data[p->x_2d->stride*1]);
+
+}
+
+void upd_point_x_2d(point *p,plane *Pi){
+	gsl_vector_memcpy(Pi->scrtch, Pi->r);
+	gsl_vector_axpby(1, p->x, -1, Pi->scrtch);
+	gsl_blas_ddot(Pi->scrtch,Pi->P_x,&p->x_2d->data[p->x_2d->stride*0]);
+	gsl_blas_ddot(Pi->scrtch,Pi->P_y,&p->x_2d->data[p->x_2d->stride*1]);
 }
 void upd_edge(edge *e,gsl_vector *scrtch){
 	point *p_i = e->p_i, *p_j = e->p_j;
@@ -131,34 +144,47 @@ void upd_edge(edge *e,gsl_vector *scrtch){
 	gsl_vector_axpby(diff_dt_k/p_i->m,x_ij,1,p_i->v);
 }
 void upd_springs(springs *s){
-	double M = 0;
-	gsl_vector_set_zero(s->mx);
+	//double M = 0;
+	//gsl_vector_set_zero(s->mx);
 	for(int i = 0;i<s->n_e;++i){
 		upd_edge(s->e + i,s->scrtch);
 	}
 	for(int i = 0;i<s->n_p;++i){
 		upd_point_x(s->p + i,s);
-		gsl_vector_axpby(s->p->m,s->p->x,1,s->mx);
-		M = M + s->p->m;
+	//	gsl_vector_axpby(s->p->m,s->p->x,1,s->mx);
+	//	M = M + s->p->m;
 	}
-	gsl_vector_scale(s->mx,1/M);
+	//gsl_vector_scale(s->mx,1/M);
 
 }
 
 
 
-void update_springs_pix(springs *s,Color *pix ,int w, int h){
-	double int_r = sqrtf(w*w+h*h)*s->p->r;
+void update_springs_pix(springs *s,plane *Pi,Color *pix ,int w, int h,double xw,double yh){
+	double int_r = sqrtf(w*w+h*h)*(s->p->r/xw);
 	for(int i = 0;i<s->n_p;++i){
+		upd_point_x_2d(s->p+i,Pi);
 		gsl_vector *px = (s->p+i)->x_2d;
-		int int_x = gsl_vector_get(px,0)*w/10;
-		int int_y = gsl_vector_get(px,1)*h/10;
+		double x = gsl_vector_get(px,0);
+		double y = gsl_vector_get(px,1);
+		x = x/xw;
+		y = y/xw;
+		int int_x = x*w;
+		int int_y = y*h;
+		int ro, co, idx;
 		for(int k = -int_r/2;k<int_r/2;++k){
+ 			co = w/2+int_x+k;
+			if((co >=  w) | (co < 0)){
+				continue;
+			}
 			for(int j = -int_r/2;j<int_r/2;++j){
-			    int idx = (h/2  - int_y + j)*w + w/2+int_x+k;
-			    if(idx > w*h){
+
+			    ro = (h/2  - int_y + j);
+			    if(ro >= h | ro < 0){
 				    continue;
 			    };
+
+			    idx = ro*w + co;
 			    pix[idx] = BLUE;
 			}
 		}
@@ -188,6 +214,8 @@ int main(){
 	int n = 3;
 	gsl_vector *mx = gsl_vector_calloc(n);
 	gsl_vector *scrtch = gsl_vector_calloc(n);
+	gsl_vector *pi_scrtch = gsl_vector_calloc(n);
+	gsl_vector *r = gsl_vector_calloc(n);
 	
 	gsl_vector *P_x = gsl_vector_calloc(n);
 	gsl_vector *P_y = gsl_vector_calloc(n);
@@ -201,7 +229,7 @@ int main(){
 
 
 	int np = 3;
-	int ne = 4;
+	int ne = 5;
 	point *p = malloc(np*sizeof(point));
 	edge *e = malloc(ne*sizeof(edge));
 
@@ -210,21 +238,24 @@ int main(){
 	}
 
 	p->x->data[0] = 1;
-	(p+1)->x->data[1] = -1;
-	(p+2)->x->data[2] = 1;
+	(p+1)->x->data[1] = 0;
+	(p+2)->x->data[0] = -1;
 
-	edge e12 = {.k=1,.l=1,.p_i = p,.p_j = p+1};
-	edge e12p = {.k=1,.l=1,.p_i = p,.p_j = p+1};
+	edge e12 = {.k=0.33,.l=1,.p_i = p,.p_j = p+1};
+	edge e12p = {.k=0.33,.l=1,.p_i = p,.p_j = p+1};
+	edge e12pp = {.k=0.33,.l=1,.p_i = p,.p_j = p+1};
 	edge e13 = {.k=1,.l=1,.p_i = p,.p_j =p+2};
 	edge e23 = {.k=1,.l=1,.p_i = p+1,.p_j = p+2};
 	int k = 0;
 
-	*e = e12;*(e+1) = e13;*(e+2) = e23;; *(e+3) = (e12p);
+	*e = e12;*(e+1) = e13;*(e+2) = e23;; *(e+3) = (e12p), *(e+4) = e12pp;
 
 	
 
-	springs s = {.n_p=np,.n_e=ne,.e=e,.p=p,.mx=mx,.scrtch = scrtch,.P_x=P_x,.P_y = P_y,.rot_ax=P_z,.rot_mat=rot_mat};
-	cross_mat(s.rot_ax,s.rot_mat);
+	springs s = {.n_p=np,.n_e=ne,.e=e,.p=p,.mx=mx,.scrtch = scrtch};
+	
+	plane Pi = {.P_x=P_x,.P_y = P_y,.rot_ax=P_z,.rot_mat=rot_mat,.scrtch = pi_scrtch,.r = r};
+	cross_mat(Pi.rot_ax,Pi.rot_mat);
 
 
 
@@ -248,34 +279,51 @@ int main(){
 	Rectangle rec = (Rectangle) {.x = 0,.y = 0,.width = w,.height=h};
 	Rectangle big_rec =(Rectangle) {.x= 0,.y=0,.width = sw,.height = sh};
 	int a = 0;
-	int scale = 1;	
+	int scale = 1;
+	int b = 1;
+	double x0 =0, y0 = 0,xw = 1,yh = 1;
 	Cursor cursor = {.x = 1.0*w*GetMouseX()/sw,.y = 1.0*GetMouseY()/sh,.vx = 0,.vy = 0,.s = 0,.h = h,.w = w};
 	while(!WindowShouldClose()){
 		
 		sw = GetScreenWidth(); sh = GetScreenHeight();	
 		big_rec.width = sw; big_rec.height = sh;
-		upd_springs(&s);
+		if(b){
+		upd_springs(&s);}
 		for(int i = 0;i<h*w;++i){
 			rgba_pixels[i] = WHITE;
 		}
-		update_springs_pix(&s, rgba_pixels, w, h);
+		update_springs_pix(&s,&Pi, rgba_pixels, w, h,xw,yh);
 		//printf("\n-------------------------\n");
 		edge *e = s.e;
 	
 
 		if(IsKeyDown(KEY_LEFT)){
-			rotate(&s,dt);
+			rotate(&Pi,dt);
 		}else if (IsKeyDown(KEY_RIGHT)) {
 
-			rotate(&s,-dt);
+			rotate(&Pi,-dt);
 		
 		}
-		if(IsKeyPressed(KEY_SPACE)){
-
-			printf("before ne = %d\n",s.n_e);
-			reduce_edges(&s);
-			printf("after ne = %d\n",s.n_e);
+		if(IsKeyPressed(KEY_SPACE) & b){
+			b = 0;
+		}else if (IsKeyPressed(KEY_SPACE)){
+			b = 1;
+		
 		}
+		if(IsKeyDown(KEY_W)){
+			gsl_vector_axpby(dt, Pi.P_y, 1, Pi.r);
+		}if(IsKeyDown(KEY_S)){
+
+			gsl_vector_axpby(-dt, Pi.P_y, 1, Pi.r);
+		}	
+		if(IsKeyDown(KEY_A)){
+
+			gsl_vector_axpby(-dt, Pi.P_x, 1, Pi.r);
+		}if(IsKeyDown(KEY_D)){
+
+			gsl_vector_axpby(dt, Pi.P_x, 1, Pi.r);
+		}
+	
 	
 		UpdateTexture(tex, rgba_pixels);
 		BeginDrawing();
@@ -283,13 +331,9 @@ int main(){
 		ClearBackground(RAYWHITE);
 		DrawTexturePro(tex,rec,big_rec,(Vector2){0,0},0,WHITE);
 		EndDrawing();
-		int mx = w*GetMouseX()/sw,my = h*GetMouseY()/sh;
-		float s = GetMouseWheelMove();
-		cursor.vx = mx - cursor.x;
-		cursor.vy = my - cursor.y;
-		cursor.s = s;
-		cursor.x = mx;
-		cursor.y = my;
+		float sc = GetMouseWheelMove();
+		xw = (1+0.01*sc)*xw;
+		yh = (1+0.01*sc)*yh;
 		}
 	UnloadTexture(tex);
 	CloseWindow();
