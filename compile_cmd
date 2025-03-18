@@ -1,1 +1,1 @@
-gcc -g main.c -lm -lgsl -lraylib
+gcc -g main.c gsl_funs.c -I. -L. -lm -lgsl -lraylib
